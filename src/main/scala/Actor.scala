@@ -1,4 +1,4 @@
-package parallelism
+package parallelism.actor
 
 import java.util.concurrent.{ExecutorService, Callable}
 import java.util.concurrent.atomic.{AtomicReference, AtomicInteger}
@@ -22,6 +22,8 @@ import annotation.tailrec
 
  Class AtomicInteger
  tldr - A bunch of methods to handle inc/dec/swap type of changes
+ def set
+ def compareAndSet
  */
 
 trait Strategy {
@@ -77,7 +79,7 @@ final class Actor[A](strategy: Strategy)(handler: A => Unit, onError: Throwable 
 
   private def act() = {
     val t = tail.get
-    val n = batchHandle(t, 1024)
+    val n = batchHandle(t, 16384)
     if (n ne t) {
       n.a = null.asInstanceOf[A]
       tail.lazySet(n)
@@ -100,4 +102,11 @@ final class Actor[A](strategy: Strategy)(handler: A => Unit, onError: Throwable 
       if (i > 0) batchHandle(n, i - 1) else n
     } else t
   }
+}
+
+object Actor {
+
+  /** Create an `Actor` backed by the given `ExecutorService`. */
+  def apply[A](es: ExecutorService)(handler: A => Unit, onError: Throwable => Unit = throw(_)): Actor[A] =
+    new Actor(Strategy.fromExecutorService(es))(handler, onError)
 }

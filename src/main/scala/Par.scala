@@ -1,20 +1,29 @@
 package parallelism
 
-import java.util.concurrent.{ExecutorService, Future, Callable, TimeUnit}
+import java.util.concurrent.{ExecutorService, Callable, CountDownLatch}
+import java.util.concurrent.atomic.{AtomicReference}
+
+sealed trait Future[+A] {
+  private[parallelism] def apply(k: A => Unit): Unit
+}
 
 /** A set of functions to describe and evaluate parallel computations
   * 
   */
 object Par {
 
-  type Par[A] = ExecutorService => Future[A]
+  type Par[+A] = ExecutorService => Future[A]
 
   /** Turn a value into a computation that immediately is available
     *
     * @param a  The raw value to turn into a Par[A]
     * @tparam A The type of the raw value
     */
-  def unit[A](a: A):Par[A] = (es: ExecutorService) => UnitFuture(a)
+  def unit[A](a: A):Par[A] =
+    es => new Future[A] {
+      def apply(cb: A => Unit): Unit =
+        cb(a)
+    }
 
   /** Turn a value into a lazy computation, mark for concurrent evaluation */
   def lazyUnit[A](a: => A):Par[A] = fork(unit(a))
@@ -22,26 +31,50 @@ object Par {
   /* EXERCISE 7.1 */
 
   /** Combine the results of two parallel compuations */
-  def map2[A,B,C](a: Par[A], b:Par[B])(f: (A, B) => C): Par[C] =
-    (es: ExecutorService) => {
-      val af = a(es)
-      val bf = b(es)
-      Map2Future(af, bf, f)
+  def map2[A,B,C](p: Par[A], p2:Par[B])(f: (A, B) => C): Par[C] =
+    es => new Future[C] {
+      def apply(cb: C => Unit): Unit = {
+        var ar: Option[A] = None
+        var br: Option[B] = None
+
+        val combiner = parallelism.ref.Actor[Either[A,B]](es) {
+            case Left(a) =>
+              if (br.isDefined) eval(es)(cb(f(a,br.get)))
+              else ar = Some(a)
+            case Right(b) =>
+              if (ar.isDefined) eval(es)(cb(f(ar.get,b)))
+              else br = Some(b)
+          }
+
+        p(es)(a => combiner ! Left(a))
+        p2(es)(b => combiner ! Right(b))
+      }
     }
 
-  def map[A, B](pa: Par[A])(f: A => B): Par[B] =
-    map2(pa, unit(()))((a, _) => f(a))
+  /*def map[A, B](pa: Par[A])(f: A => B): Par[B] =
+    map2(pa, unit(()))((a, _) => f(a))*/
+
+  // specialized version of `map`
+  def map[A,B](p: Par[A])(f: A => B): Par[B] =
+    es => new Future[B] {
+      def apply(cb: B => Unit): Unit =
+        p(es)(a => eval(es) { cb(f(a)) })
+    }
 
   /** Mark a computation for concurrent evaluation */
   def fork[A](a: => Par[A]): Par[A] =
-    es => es.submit(new Callable[A] {
-      def call = a(es).get
-    })
+    es => new Future[A] {
+      def apply(cb: A => Unit): Unit =
+        eval(es)(a(es)(cb))
+    }
 
-  def deadlockingFork[A](a: => Par[A]): Par[A] =
+  def eval(es: ExecutorService)(r: => Unit): Unit =
+    es.submit(new Callable[Unit] { def call = r })
+
+  /*def deadlockingFork[A](a: => Par[A]): Par[A] =
     es => es.submit(new Callable[A] {
       def call = a(es).get
-    })
+    })*/
 
   /* EXERCISE 7.9 */
 
@@ -58,22 +91,74 @@ object Par {
    */
 
   /** Evaluate a parallel computation */
-  //def run[A](s: ExecutorService)(a: Par[A]): Future[A]
+  def run[A](es: ExecutorService)(p: Par[A]): A = {
+
+    val ref = new AtomicReference[A]
+
+    val latch = new CountDownLatch(1)
+
+    p(es) { a => ref.set(a); latch.countDown }
+
+    latch.await
+
+    ref.get
+  }
+
+  /** EXERCISE 7.10 */
+
+  def safeRun[A](es: ExecutorService)(p: Par[A]): Option[A] = {
+    val ref = new AtomicReference[Option[A]]
+    val latch = new CountDownLatch(1)
+
+    // map, map2, and fork make calls to eval, which call es.submit with a Callable.
+    // submit can fail with RejectedExecutionException
+    // Callable's call can fail with Exception
+
+    try {
+
+      p(es) { a => ref.set(Some(a)) }
+
+    } catch {
+
+      case t: Throwable => ref.set(None)
+
+    } finally {
+
+      latch.countDown
+
+    }
+    
+    latch.await
+
+    ref.get
+  }
 
   /* EXERCISE 7.5 */
 
-  def sequence[A](ps: List[Par[A]]): Par[List[A]] =
+  // NOTE: This will lead to stack overflows for large calculations!
+  def sequenceThatStackOverflows[A](ps: List[Par[A]]): Par[List[A]] =
     ps.foldRight[Par[List[A]]](unit(Nil))((cur, acc) =>
       map2(cur, acc)((h,t) => h :: t))
+
+  def sequenceBalanced[A](as: IndexedSeq[Par[A]]): Par[IndexedSeq[A]] = fork {
+      if (as.isEmpty) unit(Vector())
+      else if (as.length == 1) map(as.head)(a => Vector(a))
+      else {
+        val (l,r) = as.splitAt(as.length/2)
+        map2(sequenceBalanced(l), sequenceBalanced(r))((ls, rs) => ls ++ rs)
+      }
+    }
+
+  def sequence[A](as: List[Par[A]]): Par[List[A]] =
+      map(sequenceBalanced(as.toIndexedSeq))(_.toList)
 
   /* Exercise 7.4 */
 
   def asyncF[A,B](f: A => B): A => Par[B] =
-    (a) => lazyUnit(f(a))
+    a => lazyUnit(f(a))
 
   def parMap[A,B](ps: List[A])(f: A => B): Par[List[B]] = {
-    val fbs = ps.map(asyncF(f))
-    sequence(fbs)
+    sequence(ps.map(asyncF(f)))
   }
 
   /* EXERCISE 7.6 */
@@ -105,7 +190,7 @@ object Par {
       var (l, r) = as.splitAt(as.length/2)
       Par.map2(
         Par.fork(reduce(l, b)(f)(g)),
-        Par.fork(reduce(l, b)(f)(g)))((cur, acc) => g(cur, acc))
+        Par.fork(reduce(r, b)(f)(g)))((cur, acc) => g(cur, acc))
     }
 
   def map3[A,B,C,D](pa: Par[A], pb: Par[B], pc: Par[C])(f: (A,B,C) => D) = {
@@ -113,61 +198,11 @@ object Par {
     map2(ab, pc)((ab, c) => ab match { case (a, b) => f(a, b, c) })
   }
 
-  def equal[A](e: ExecutorService)(p: Par[A], p2: Par[A]): Boolean =
-    p(e).get == p2(e).get
+  /*def equal[A](e: ExecutorService)(p: Par[A], p2: Par[A]): Boolean =
+    p(e) == p2(e)*/
 
   def delay[A](fa: => Par[A]): Par[A] =
     es => fa(es)
-
-  /** Define at low-level how to return a Future for a known value */
-  private case class UnitFuture[A](get: A) extends Future[A] {
-    def isDone = true
-    def get(timeout: Long, units: TimeUnit) = get
-    def isCancelled = false
-    def cancel(evenIfRunning: Boolean): Boolean = false
-  }
-
-  /* EXERCISE 7.3 */
-
-  /** Define at low-level how to combine two futures */
-  private case class Map2Future[A,B,C](a: Future[A], b: Future[B], f: (A,B) => C) extends Future[C] {
-    // Cache is a variable for the result
-    @volatile var cache: Option[C] = None
-
-    def isDone = cache.isDefined
-
-    def get = compute(Long.MaxValue)
-    def get(timeout: Long, units:TimeUnit) =
-      compute(TimeUnit.NANOSECONDS.convert(timeout, units))
-
-    def isCancelled = a.isCancelled || b.isCancelled
-
-    def cancel(evenIfRunning: Boolean): Boolean = 
-      a.cancel(evenIfRunning) || b.cancel(evenIfRunning)
-
-    private def compute(timeoutInNanos: Long): C = cache match {
-      case Some(c) => c
-      case None => {
-        // The timeout needs to be shared...
-        val aStart = System.nanoTime
-        val aResult = a.get(timeoutInNanos, TimeUnit.NANOSECONDS)
-        val aEnd = System.nanoTime
-
-        val aDuration = (aEnd - aStart)
-
-        // The reamaining time that future b has to run
-        val bLimit = timeoutInNanos - aDuration
-
-        val bResult = b.get(bLimit, TimeUnit.NANOSECONDS)
-
-        val result = f(aResult, bResult)
-
-        cache = Some(result)
-
-        result
-      }
-    }
-  }
 }
 
 /* EXERCISE 7.7 */

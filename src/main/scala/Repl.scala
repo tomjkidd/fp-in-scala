@@ -1,3 +1,4 @@
+import java.util.concurrent.Executors
 import parallelism.Par
 
 object Repl {
@@ -34,9 +35,24 @@ object Repl {
     Par.asyncF((p) => p.split(" ").toList)
   }
 
-  def wordCount(pars: IndexedSeq[String]): Par.Par[Int] =
+  def wordCount(pars: IndexedSeq[String])  = {
     Par.reduce(pars, 0)((a, b) => a.split(" ").length + b)((b1, b2) => b1 + b2)
+  }
 
+  def run[A](par: Par.Par[A]): A = {
+    Par.run(Executors.newFixedThreadPool(2))(par)
+  }
+
+  def parMapExample(n: Int) = {
+    val p = Par.parMap(List.range(1, n))(math.sqrt(_))
+    val x = Par.run(Executors.newFixedThreadPool(2))(p)
+    x
+  }
+
+  def safeRunDemo() = {
+    val p = Par.map(Par.unit(1))(a => a / 0)
+    Par.safeRun(Executors.newFixedThreadPool(2))(p)
+  }
 }
 
 /*
