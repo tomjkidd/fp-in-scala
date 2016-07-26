@@ -49,9 +49,28 @@ object Repl {
     x
   }
 
-  def safeRunDemo() = {
-    val p = Par.map(Par.unit(1))(a => a / 0)
-    Par.safeRun(Executors.newFixedThreadPool(2))(p)
+  def safeRun[A](p: Par.SafePar[A]) = {
+    println(Par.safeRun(Executors.newFixedThreadPool(2))(p))
+  }
+
+  def safeRunDemo(n: Int) = {
+    val p = Par.safeMap(Par.safeUnit(1))(a => a / 0)
+    safeRun(p)
+
+    val q = Par.safeMap(Par.safeUnit(10))(a => a / 2)
+    safeRun(q)
+
+    val r = Par.safeLazyUnit({ throw new IllegalStateException("Exception thrown") })
+    safeRun(r)
+
+    val s = Par.safeMap2(q, r)((a, b) => (a, b))
+    safeRun(s)
+
+    val t = Par.safeMap2(q, q)((a, b) => a + b)
+    safeRun(t)
+
+    val u = Par.safeParMap(List.range(1, n))(math.sqrt(_))
+    safeRun(u)
   }
 }
 

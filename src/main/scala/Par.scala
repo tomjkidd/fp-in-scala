@@ -6,6 +6,9 @@ import java.util.concurrent.atomic.{AtomicReference}
 sealed trait Future[+A] {
   private[parallelism] def apply(k: A => Unit): Unit
 }
+sealed trait SafeFuture[+A] {
+  private[parallelism] def apply(k: Option[A] => Unit): Unit
+}
 
 /** A set of functions to describe and evaluate parallel computations
   * 
@@ -13,6 +16,7 @@ sealed trait Future[+A] {
 object Par {
 
   type Par[+A] = ExecutorService => Future[A]
+  type SafePar[+A] = ExecutorService => SafeFuture[A]
 
   /** Turn a value into a computation that immediately is available
     *
@@ -25,8 +29,16 @@ object Par {
         cb(a)
     }
 
+  def safeUnit[A](a: A): SafePar[A] =
+    es => new SafeFuture[A] {
+      def apply(cb: Option[A] => Unit): Unit =
+        cb(Some(a))
+    }
+
   /** Turn a value into a lazy computation, mark for concurrent evaluation */
   def lazyUnit[A](a: => A):Par[A] = fork(unit(a))
+
+  def safeLazyUnit[A](a: => A):SafePar[A] = safeFork(safeUnit(a))
 
   /* EXERCISE 7.1 */
 
@@ -51,6 +63,31 @@ object Par {
       }
     }
 
+  def safeMap2[A,B,C](p: SafePar[A], p2:SafePar[B])(f: (A, B) => C): SafePar[C] =
+    es => new SafeFuture[C] {
+      def apply(cb: Option[C] => Unit): Unit = {
+        var ar: Option[A] = None
+        var br: Option[B] = None
+
+        val combiner = parallelism.ref.Actor[Either[A,B]](es) {
+          case Left(a) =>
+            if (br.isDefined) safeEval(es)(() => {cb(Some(f(a,br.get)))})(cb)
+            else ar = Some(a)
+          case Right(b) =>
+            if (ar.isDefined) safeEval(es)(() => {cb(Some(f(ar.get,b)))})(cb)
+            else br = Some(b)
+        }
+        p(es)(oa => oa match {
+          case Some(a) => combiner ! Left(a)
+          case None => cb(None)
+        })
+        p2(es)(ob => ob match {
+          case Some(b) => combiner ! Right(b)
+          case None => cb(None)
+        })
+      }
+    }
+
   /*def map[A, B](pa: Par[A])(f: A => B): Par[B] =
     map2(pa, unit(()))((a, _) => f(a))*/
 
@@ -61,6 +98,15 @@ object Par {
         p(es)(a => eval(es) { cb(f(a)) })
     }
 
+  def safeMap[A,B](p: SafePar[A])(f: A => B): SafePar[B] =
+    es => new SafeFuture[B] {
+      def apply(cb: Option[B] => Unit): Unit =
+        p(es)(oa => oa match {
+          case Some(a) => safeEval(es)(() => { cb(Some(f(a))) })(cb)
+          case None => cb(None)
+        })
+    }
+
   /** Mark a computation for concurrent evaluation */
   def fork[A](a: => Par[A]): Par[A] =
     es => new Future[A] {
@@ -68,8 +114,27 @@ object Par {
         eval(es)(a(es)(cb))
     }
 
+  def safeFork[A](a: => SafePar[A]): SafePar[A] =
+    es => new SafeFuture[A] {
+      def apply(cb: Option[A] => Unit): Unit =
+        safeEval(es)(() => a(es)(cb))(cb)
+    }
+
   def eval(es: ExecutorService)(r: => Unit): Unit =
     es.submit(new Callable[Unit] { def call = r })
+
+  def safeEval[A](es: ExecutorService)(r: () => Unit)(cb: Option[A] => Unit): Unit = {
+    val callback = {
+
+      try {
+        r()
+      } catch {
+        case t: Throwable => {println("Throw detected"); cb(None)}
+      }
+    }
+    es.submit(new Callable[Unit] { def call = callback })
+  }
+
 
   /*def deadlockingFork[A](a: => Par[A]): Par[A] =
     es => es.submit(new Callable[A] {
@@ -106,7 +171,7 @@ object Par {
 
   /** EXERCISE 7.10 */
 
-  def safeRun[A](es: ExecutorService)(p: Par[A]): Option[A] = {
+  def safeRun[A](es: ExecutorService)(p: SafePar[A]): Option[A] = {
     val ref = new AtomicReference[Option[A]]
     val latch = new CountDownLatch(1)
 
@@ -114,19 +179,7 @@ object Par {
     // submit can fail with RejectedExecutionException
     // Callable's call can fail with Exception
 
-    try {
-
-      p(es) { a => ref.set(Some(a)) }
-
-    } catch {
-
-      case t: Throwable => ref.set(None)
-
-    } finally {
-
-      latch.countDown
-
-    }
+    p(es) { a => ref.set(a); latch.countDown }
     
     latch.await
 
@@ -149,16 +202,36 @@ object Par {
       }
     }
 
+  def safeSequenceBalanced[A](as: IndexedSeq[SafePar[A]]): SafePar[IndexedSeq[A]] =
+    safeFork {
+      if (as.isEmpty) safeUnit(Vector())
+      else if (as.length == 1) safeMap(as.head)(a => Vector(a))
+      else {
+        val (l,r) = as.splitAt(as.length/2)
+        safeMap2(safeSequenceBalanced(l), safeSequenceBalanced(r))((ls, rs) => ls ++ rs)
+      }
+    }
+
   def sequence[A](as: List[Par[A]]): Par[List[A]] =
-      map(sequenceBalanced(as.toIndexedSeq))(_.toList)
+    map(sequenceBalanced(as.toIndexedSeq))(_.toList)
+
+  def safeSequence[A](as: List[SafePar[A]]): SafePar[List[A]] =
+    safeMap(safeSequenceBalanced(as.toIndexedSeq))(_.toList)
 
   /* Exercise 7.4 */
 
   def asyncF[A,B](f: A => B): A => Par[B] =
     a => lazyUnit(f(a))
 
+  def safeAsyncF[A,B](f: A => B): A => SafePar[B] =
+    a => safeLazyUnit(f(a))
+
   def parMap[A,B](ps: List[A])(f: A => B): Par[List[B]] = {
     sequence(ps.map(asyncF(f)))
+  }
+
+  def safeParMap[A,B](ps: List[A])(f: A => B): SafePar[List[B]] = {
+    safeSequence(ps.map(safeAsyncF(f)))
   }
 
   /* EXERCISE 7.6 */
