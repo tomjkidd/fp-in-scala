@@ -1,10 +1,13 @@
 package testing
 
+import java.util.concurrent.{ExecutorService, Executors}
+
 import state._
 import rng._
 
 import Prop._
 import laziness._
+import parallelism._
 
 // State[RNG, A] eq RNG => (A, RNG)
 /** A class used to generated random samples */
@@ -30,6 +33,10 @@ case class Gen[+A](sample: State[RNG, A]) {
         Gen.unit(f(a,b))
       })
     })
+
+  /** Combine this Gen with another in a tuple */
+  def **[B](g: Gen[B]): Gen[(A,B)] =
+    (this map2 g)((a, b) => (a, b))
 
   /* EXERCISE 8.10 */
 
@@ -96,7 +103,6 @@ object Gen {
 
   def listOf1[A](g: Gen[A]): SGen[List[A]] =
     SGen(n => g.listOfN(n max 1))
-
 }
 
 
@@ -213,4 +219,18 @@ object Prop {
         case v => v
       }
     })
+
+  def S = Gen.weighted(
+    Gen.choose(1,4).map(Executors.newFixedThreadPool) -> .75,
+    Gen.unit(Executors.newCachedThreadPool) -> .25)
+
+  def forAllPar[A](g: Gen[A])(f: A => Par.Par[Boolean]): Prop =
+    forAll(S.map2(g)((_,_))){ case (s,a) => Par.run(s)(f(a)) }
+
+  def forAllPar2[A](g: Gen[A])(f: A => Par.Par[Boolean]): Prop =
+    forAll(S ** g){ case (s,a) => Par.run(s)(f(a))}
+
+  def checkPar(p: Par.Par[Boolean]): Prop =
+    forAllPar(Gen.unit(()))(_ => p)
+    
 }

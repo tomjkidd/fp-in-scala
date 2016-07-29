@@ -282,6 +282,9 @@ object Par {
   /*def equal[A](e: ExecutorService)(p: Par[A], p2: Par[A]): Boolean =
     p(e) == p2(e)*/
 
+  def equal[A](p: Par[A], p2: Par[A]): Par[Boolean] =
+    Par.map2(p, p2)((a, b) => {println(a); a == b})
+
   def delay[A](fa: => Par[A]): Par[A] =
     es => fa(es)
 }
