@@ -46,6 +46,12 @@ object RNG {
   def booleanState: state.State[RNG, Boolean] =
     intState.map(n => n % 2 == 0)
 
+  def trueState: State[RNG, Boolean] =
+    intState.map(_ => true)
+
+  def falseState: State[RNG, Boolean] =
+    intState.map(_ => false)
+
   def nonNegativeIntState: State[RNG, Int] =
     intState.map(n => if (n == Int.MinValue) 0 else Math.abs(n))
 

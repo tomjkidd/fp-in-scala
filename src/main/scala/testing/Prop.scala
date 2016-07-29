@@ -7,6 +7,7 @@ import Prop._
 import laziness._
 
 // State[RNG, A] eq RNG => (A, RNG)
+/** A class used to generated random samples */
 case class Gen[+A](sample: State[RNG, A]) {
 
   /* EXERCISE 8.6 */
@@ -22,6 +23,13 @@ case class Gen[+A](sample: State[RNG, A]) {
 
   def map[B](f: A => B): Gen[B] =
     flatMap(s => Gen.unit(f(s)))
+
+  def map2[B,C](gb: Gen[B])(f: (A,B) => C): Gen[C] =
+    flatMap[C](a => {
+      gb.flatMap[C](b => {
+        Gen.unit(f(a,b))
+      })
+    })
 
   /* EXERCISE 8.10 */
 
@@ -49,9 +57,6 @@ case class SGen[+A](forSize: Int => Gen[A]) {
 }
 
 object Gen {
-  /*def listOf[A](a: Gen[A]): Gen[List[A]]
-
-  def listOfN[A](n: Int, a: Gen[A]): Gen[List[A]]*/
 
   /* EXERCISE 8.4 */
 
@@ -84,6 +89,14 @@ object Gen {
       else g2._1.sample))
   }
 
+  def listOf[A](g: Gen[A]): SGen[List[A]] =
+    SGen(n => g.listOfN(n))
+
+  /* EXERCISE 8.13 */
+
+  def listOf1[A](g: Gen[A]): SGen[List[A]] =
+    SGen(n => g.listOfN(n max 1))
+
 }
 
 
@@ -91,24 +104,26 @@ object Gen {
   def check: Either[(FailedCase, SuccessCount), SuccessCount]
   def &&(p: Prop): Prop
 }*/
-case class Prop(run: (TestCases,RNG) => Result) {
+case class Prop(run: (MaxSize,TestCases,RNG) => Result) {
   /* EXERCISE 8.9 */
 
   def &&(p: Prop): Prop =
-    Prop((tc, rng) => {
-      val r = this.run(tc, rng)
+    Prop((max, tc, rng) => {
+      val r = this.run(max, tc, rng)
       r match {
-        case Passed => p.run(tc, rng)
+        case Passed => p.run(max, tc, rng)
+        case Proved => p.run(max, tc, rng)
         case f => f
       }
     })
 
   def ||(p: Prop): Prop =
-    Prop((tc, rng) => {
-      val r = this.run(tc, rng)
+    Prop((max, tc, rng) => {
+      val r = this.run(max, tc, rng)
       r match {
-        case Passed => Passed
-        case _ => p.run(tc, rng)
+        case Passed => r
+        case Proved => r
+        case _ => p.run(max, tc, rng)
       }
     })
 }
@@ -117,10 +132,15 @@ object Prop {
   type TestCases = Int
   type FailedCase = String
   type SuccessCount = Int
+  type MaxSize = Int
 
   sealed trait Result {
     def isFalsified: Boolean
   }
+  case object Proved extends Result {
+    def isFalsified = true
+  }
+
   case object Passed extends Result {
     def isFalsified = false
   }
@@ -130,13 +150,25 @@ object Prop {
   }
 
   def forAll[A](as: Gen[A])(f: A => Boolean): Prop = Prop {
-    (n, rng) => randomStream(as)(rng).zip(Stream.from(0)).take(n).map({
+    (max,n,rng) => randomStream(as)(rng).zip(Stream.from(0)).take(n).map {
       case (a, i) => try {
         if (f(a)) Passed else Falsified(a.toString, i)
-      } catch {
-        case e: Exception => Falsified(buildMsg(a, e), i)
-      }
-    }).find(x => x.isFalsified).getOrElse(Passed)
+      } catch { case e: Exception => Falsified(buildMsg(a, e), i) }
+    }.find(_.isFalsified).getOrElse(Passed)
+  }
+
+  def forAll[A](g: SGen[A])(f: A => Boolean): Prop =
+    forAll(g.forSize(_))(f)
+
+  def forAll[A](g: Int => Gen[A])(f: A => Boolean): Prop = Prop {
+    (max, n, rng) => {
+      val casesPerSize = (n + (max - 1)) / max
+      val props: Stream[Prop] =
+        Stream.from(0).take((n min max) + 1).map(i => forAll(g(i))(f))
+      val prop: Prop =
+        props.map(p => Prop((max, _, rng) => p.run(max, casesPerSize, rng))).toList.reduce(_ && _)
+      prop.run(max, n, rng)
+    }
   }
 
   def randomStream[A](g: Gen[A])(rng: RNG): Stream[A] =
@@ -146,4 +178,39 @@ object Prop {
     s"test case: $s\n" +
     s"generated an exception: ${e.getMessage}\n" +
     s"stack trace:\n ${e.getStackTrace.mkString("\n")}"
+
+  def run(p: Prop,
+    maxSize: Int = 100,
+    testCases: Int = 100,
+    rng: RNG = RNG.Simple(System.currentTimeMillis)): Unit =
+    p.run(maxSize, testCases, rng) match {
+      case Falsified(msg, n) =>
+        println(s"!Falsified after $n passed tests:\n $msg")
+      case Passed =>
+        println(s"+ OK, passed $testCases tests.")
+      case Proved =>
+        println(s"+ OK, proved property.")
+    }
+
+  def check(p: Boolean): Prop =
+    Prop((_,_,_) => if (p) Passed else Falsified("()", 0))
+
+  /* EXERCISE 8.15 */
+
+  /*
+   * Small domains can be Proved, as opposed to just Passed
+   * Boolean, Byte, and other small domains could be added
+   */
+  // TODO: Add a function to prove Byte type
+
+  def forAllBool(f: Boolean => Boolean): Prop =
+    Prop((max,n,rng) => {
+      val tGen = Gen.unit(true)
+      val fGen = Gen.unit(false)
+      val tfGen = tGen.map2[Boolean, Boolean](fGen)((a, b) => f(a) && f(b))
+      forAll(tfGen)(f).run(max, 1, rng) match {
+        case Passed => Proved
+        case v => v
+      }
+    })
 }
