@@ -123,6 +123,14 @@ object Par {
   def eval(es: ExecutorService)(r: => Unit): Unit =
     es.submit(new Callable[Unit] { def call = r })
 
+  /** Attempt to perform a SafePar[A] computation in a closure, r.
+    * Applying r should call cb with Some(a) in order to indicate the computation succeeded.
+    * In the case of a failure, the callback cb is called directly with None.
+    * 
+    * The ExecutorService will ultimaetly run r, but it is wrapped in order to handle if
+    * r throws an exception so that the callback will surely be called even in that case.
+    * This makes it so that safeRun will terminate in the case where any SafePar throws.
+    */
   def safeEval[A](es: ExecutorService)(r: () => Unit)(cb: Option[A] => Unit): Unit = {
     val callback = {
 
