@@ -120,6 +120,37 @@ object PropRepl {
     Gen.choose(0,10).map(n => Par.unit(n))
   }
 
+  def richParGen: Gen[Par.Par[Int]] = Gen(State((rng:RNG) => {
+    val (elementsToCombine, rng2) = Gen.choose(0, 100).sample.run(rng)
+    val (ints, rng3) = Gen.choose(-10, 10).
+      listOfN(elementsToCombine).
+      sample.run(rng2)
+
+    val (unitFns, rng4) = Gen.oneOf(List(
+      Gen.unit((n:Int) => Par.unit(n)),
+      Gen.unit((n:Int) => Par.lazyUnit(n)))).
+      listOfN(elementsToCombine).
+      sample.run(rng3)
+
+    val (ops, rng5) = Gen.oneOf(List(
+      Gen.unit((a:Int,b:Int) => a + b),
+      Gen.unit((a:Int,b:Int) => a - b))).
+      listOfN(elementsToCombine - 1).
+      sample.run(rng4)
+
+    val richPar = ints.zip(unitFns).
+      map((tup) => tup match {
+        case (i, u) => u(i)
+      }).
+      zip(ops).
+      foldLeft(Par.unit(0))((accPar, c) => c match {
+        case (curPar, op) =>
+          Par.map2(curPar, accPar)((cur, acc) => op(acc, cur))
+      })
+
+    (richPar, rng5)
+  }))
+
   def exercise8Dot16() = {
     /*
      * The code presented here is a proof-of-concept for creating a rich Par
@@ -141,9 +172,11 @@ object PropRepl {
             Par.map2(curPar, accPar)((cur,acc) => op(acc,cur))
         })
 
-    val richParGen: Gen[Par.Par[Int]] = Gen.unit(richPar)
-    val prop = Prop.forAllPar(richParGen)(n => Par.equal(Par.fork(n), n))
-    Prop.run(prop)
+    val richParGenLocal: Gen[Par.Par[Int]] = Gen.unit(richPar)
+    val prop = Prop.forAllPar(richParGenLocal)(n => Par.equal(Par.fork(n), n))
+
+    val prop2 = Prop.forAllPar(richParGen)(n => Par.equal(Par.fork(n), n))
+    Prop.runAll(List(prop, prop2))
 
   }
 
@@ -155,11 +188,25 @@ object PropRepl {
     Prop.run(prop)
   }
 
+  val isEven = (i: Int) => i % 2 == 0
+
   def exercise8Dot18() = {
-    // takeWhile(p: (A) => Boolean): List[A]
-    // ns.takeWhile(f).forall(f) == true
-    // ns.startsWith(ns.takeWhile(f)) == true
-    // ns.takeWhile(f) ++ ns.dropWhile(f) == ns
+    
+    val p = Prop.forAll(Gen.listOf(Gen.choose(-100, 100)))((ns) => {
+      val taken = ns.takeWhile(isEven)
+      val notTaken = ns.dropWhile(isEven)
+      ns == (taken ++ notTaken)
+    })
+
+    val p2 = Prop.forAll(Gen.listOf(Gen.choose(-100, 100)))((ns) => {
+      ns.takeWhile(isEven).forall(isEven)
+    })
+
+    val p3 = Prop.forAll(Gen.listOf(Gen.choose(-100, 100)))((ns) => {
+      ns.startsWith(ns.takeWhile(isEven)) == true
+    })
+
+    Prop.runAll(List(p,p2,p3))
   }
 
   def exercise8Dot19() = {
@@ -169,7 +216,7 @@ object PropRepl {
      * length()/size(): Int -> Less information, depends only on length
      * toInt(): Int -> Throws exceptions
      */
-    // TODO: Incorporate one of the String => Int function into a RNG
+    
     def getStringIntFn(g: Gen[Int]): Gen[String => Int] =
       g map (i => (s => s.length))
 
@@ -194,6 +241,20 @@ object PropRepl {
      * Properties for sequence for Option and Either
      */
     // TODO: Create some properties for the above comment
+    val smallInt = Gen.choose(-100, 100)
+    val p = forAll(Gen.listOf(smallInt))((ns) => {
+      val taken = ns.take(2)
+      val notTaken = ns.drop(2)
+      taken.length + notTaken.length == ns.length
+    })
+
+    val p2 = forAll(Gen.listOf(smallInt))((ns) => {
+      val even = ns.filter(isEven)
+      val odd = ns.filter(x => !isEven(x))
+      even.length + odd.length == ns.length
+    })
+
+    Prop.runAll(List(p,p2))
   }
   
   def mapLaw() = {
@@ -201,5 +262,21 @@ object PropRepl {
      * Properties for Stream, List, Option, State
      * map(x)(id) == x
      */
+  }
+
+  def oneOfNaive[A](lgs: List[Gen[A]]): Gen[A] = {
+    // NOTE: This does not give each element equal probability
+    lgs.reduce((a, b) => Gen.weighted((a, .5),(b, .5)))
+  }
+
+  def testSplit() = {
+    val rawChoices = List(1,2,3,4)
+    val choices = rawChoices.map(n => Gen.unit(n))
+    val generator = Gen.oneOf(choices)
+    val p = forAll(generator)((n) => {
+      rawChoices.contains(n)
+    })
+
+    Prop.run(p)
   }
 }

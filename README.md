@@ -36,11 +36,21 @@ def Par.safeRun[A](es: ExecutorService)(p: SafePar[A]): Option[A]
 
 case class Gen[+A](sample: State[RNG, A])
 case class SGen[+A](forSize: Int => Gen[A])
+def Gen.choose(start: Int, stopExclusive: Int): Gen[Int]
+def Gen.unit[A](a: => A): Gen[A]
+def Gen.listOfN[A](n: Int, g: Gen[A]): Gen[List[A]]
+def Gen.listOf[A](g: Gen[A]): SGen[List[A]]
+def Gen.listOf1[A](g: Gen[A]): SGen[List[A]]
+
 case class Prop(run: (MaxSize, TestCases, RNG) => Result)
 def Prop.run(p: Prop,
     maxSize: Int = 100,
     testCases: Int = 100,
     rng: RNG = RNG.Simple(System.currentTimeMillis)): Unit
+def forAll[A](as: Gen[A])(f: A => Boolean): Prop
+def forAll[A](g: SGen[A])(f: A => Boolean): Prop
+def forAll[A](g: Int => Gen[A])(f: A => Boolean): Prop
+def forAllPar[A](g: Gen[A])(f: A => Par.Par[Boolean]): Prop
 def check(p: Boolean): Prop
 def checkPar(p: Par.Par[Boolean]): Prop
 def randomStream[A](g: Gen[A])(rng: RNG): Stream[A]

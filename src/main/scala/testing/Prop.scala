@@ -96,6 +96,11 @@ object Gen {
       else g2._1.sample))
   }
 
+  def oneOf[A](gs: List[Gen[A]]): Gen[A] = {
+    Gen(rng.RNG.nonNegativeLessThanState(gs.size)).
+      flatMap(i => gs(i))
+  }
+
   def listOf[A](g: Gen[A]): SGen[List[A]] =
     SGen(n => g.listOfN(n))
 
@@ -197,6 +202,10 @@ object Prop {
       case Proved =>
         println(s"+ OK, proved property.")
     }
+
+  def runAll(ps: List[Prop]): Unit = {
+    ps.foreach((p) => run(p))
+  }
 
   def check(p: Boolean): Prop =
     Prop((_,_,_) => if (p) Passed else Falsified("()", 0))
