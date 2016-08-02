@@ -61,6 +61,11 @@ case class SGen[+A](forSize: Int => Gen[A]) {
     SGen((size) => {
       g.listOfN(size)
     })
+
+  def apply(n: Int): Gen[A] = forSize(n)
+
+  def **[B](s2: SGen[B]): SGen[(A,B)] =
+    SGen(n => apply(n) ** s2(n))
 }
 
 object Gen {
@@ -108,6 +113,11 @@ object Gen {
 
   def listOf1[A](g: Gen[A]): SGen[List[A]] =
     SGen(n => g.listOfN(n max 1))
+
+  def stringN(n: Int): Gen[String] =
+    listOfN(n, choose(0,127)).map(_.map(_.toChar).mkString)
+
+  val string: SGen[String] = SGen(stringN)
 }
 
 
@@ -241,5 +251,8 @@ object Prop {
 
   def checkPar(p: Par.Par[Boolean]): Prop =
     forAllPar(Gen.unit(()))(_ => p)
+
+  def equal[A](p: Par.Par[A], p2: Par.Par[A]): Par.Par[Boolean] =
+    Par.map2(p,p2)(_ == _)
     
 }
