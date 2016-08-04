@@ -21,6 +21,11 @@ object ReferenceTypes {
       case Success(a,m) => Success(a,n+m)
       case _ => this
     }
+
+    def mapError(f: ParseError => ParseError): Result[A] = this match {
+      case Failure(e) => Failure(f(e))
+      case _ => this
+    }
   }
   case class Success[+A](get: A, charsConsumed: Int) extends Result[A]
   case class Failure(get: ParseError) extends Result[Nothing]
@@ -100,5 +105,21 @@ object BaseParsers extends Parsers[ParserType]{
         }
       }
       go(p, 0)
+    }
+
+  def label[A](msg: String)(p: ParserType[A]): ParserType[A] =
+    (parseState: ParseState) => {
+      p(parseState).mapError(_.label(msg))
+    }
+
+  def errorLocation(e: ParseError): Location =
+    e.stack.head match { case (l, _) => l }
+
+  def errorMessage(e: ParseError): String =
+    e.stack.head match { case (_, msg) => msg }
+
+  def scope[A](msg: String)(p: ParserType[A]): ParserType[A] =
+    (parseState: ParseState) => {
+      p(parseState).mapError(_.push(parseState.loc, msg))
     }
 }

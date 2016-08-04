@@ -39,13 +39,60 @@ object ParseRepl {
 
   def exercise9Dot6(): Either[ParseError, List[String]] = {
     val p = BaseParsers
-    var parser =
+    val parser =
     p.flatMap(p.regex("[\\d]+".r))((a) => {
       val charsToTake = a.toInt
       p.listOfN(charsToTake, p.regex("[a-z]".r))
     })
 
     p.run(parser)("4aaaa")
+  }
+
+  def testDigitsAndWhitespace(): Either[ParseError, String] = {
+    val p = BaseParsers
+    val parser =
+      p.map2(
+        p.map2(p.digits, p.whitespace)((d, w) => d),
+        p.digits
+      )((d,e) => d + e)
+
+    p.run(parser)("123  456")
+  }
+
+  def testSkip(): Either[ParseError, String] = {
+    val p = BaseParsers
+    val p1 =
+      p.skipLeft(p.char(','), p.digits)
+
+    val p2 =
+      p.skipRight(p.digits, p.whitespace)
+
+    val parser = p.map2(p2, p1)((a, b) => a + ", " + b)
+
+    p.run(parser)("123\n  ,456")
+  }
+
+  def test(): Boolean = {
+    val p = BaseParsers
+    val xParser = p.char('x')
+    val whitespaceAndValue = p.map2(p.whitespace, xParser)((_,x) => x)
+    val parser = p.or(whitespaceAndValue, xParser)
+
+    p.run(parser)(" x") == p.run(parser)("x")
+  }
+
+  def testSep(): List[Either[ParseError,List[String]]] = {
+    val p = BaseParsers
+    val whitespaceOrDigits = p.map2(p.whitespace, p.digits)((_,d) => d)
+    val zom = p.sep(whitespaceOrDigits, p.char(','))
+    val oom = p.sep1(whitespaceOrDigits, p.char(','))
+
+    List(
+      p.run(oom)(" 123 456 789"),
+      p.run(oom)(" 123, 456,789"),
+      p.run(zom)(""),
+      p.run(zom)("123"),
+      p.run(zom)("123,456"))
   }
 }
 

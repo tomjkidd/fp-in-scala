@@ -73,6 +73,31 @@ trait Parsers[Parser[+_]] {
 
   def regex(r: scala.util.matching.Regex): Parser[String]
 
+  /** A parser which consumes zero or more whitespace characters */
+  def whitespace: Parser[String] = regex("\\s*".r)
+
+  /** A parser which consumes one or more digits */
+  def digits: Parser[String] = regex("\\d+".r)
+
+  /** Sequence two parsers, ignoring the result of the first */
+  def skipLeft[A, B](pl: Parser[A], pr: Parser[B]): Parser[B] =
+    map2(slice(pl), pr)((_, r) => r)
+
+  /** Sequence two parsers, ignoring the result of the second */
+  def skipRight[A, B](pl: Parser[A], pr: Parser[B]): Parser[A] =
+    map2(pl, slice(pr))((l, _) => l)
+
+  /** Zero or more repetitions of `p`, separated by `p2`, whose results are ignored. */
+  def sep[A,B](p: Parser[A], p2: Parser[B]): Parser[List[A]] = {
+    or(sep1(p, p2), unit(Nil))
+  }
+
+  /** One or more repetitions of `p`, separated by `p2` */
+  def sep1[A,B](p: Parser[A], p2: Parser[B]): Parser[List[A]] = {
+    val sepThenVal = map2(p2, p)((_, p) => p)
+    map2(p, zeroOrMore(sepThenVal))((a, bs) => a :: bs)
+  }
+
   /* EXERCISE 9.7 */
   // Implement product and map2 in terms of flatMap
   def productUsingFlatMap[A,B](p: Parser[A], p2: => Parser[B]): Parser[(A,B)] =
@@ -89,12 +114,12 @@ trait Parsers[Parser[+_]] {
   /* Error handling combinators */
 
   /** Assign an error message to a parser */
-  /*def label[A](msg: String)(p: Parser[A]): Parser[A]
+  def label[A](msg: String)(p: Parser[A]): Parser[A]
   def errorLocation(e: ParseError): Location
   def errorMessage(e: ParseError): String
   def scope[A](msg: String)(p: Parser[A]): Parser[A]
 
-  def attempt[A](p: Parser[A]): Parser[A]*/
+  /*def attempt[A](p: Parser[A]): Parser[A]*/
 
   /* EXERCISE 9.10 */
 
@@ -106,11 +131,13 @@ trait Parsers[Parser[+_]] {
   // specify what error(s) in an 'or' chain get reported?
 
   /* EXERCISE 9.12 */
-  // TODO: Use the primitive combinators to create an implementation
+  // Use the primitive combinators to create an implementation
   // {string, regex, slice, label, scope, flatMap, attempt, or}
+  // DONE: BaseParser.scala
 
   /* EXERCISE 9.13 */
-  // TODO: Implement string, regex, succeed, and slice for the reference implementation
+  // Implement string, regex, succeed, and slice for the reference implementation
+  // DONE: BaseParser.scala
 
   /* EXERCISE 9.14 */
   // TODO: Revise string to use scope and/or label to provide meaningful error msgs
@@ -149,13 +176,13 @@ trait Parsers[Parser[+_]] {
 
     /* EXERCISE 9.2 */
     // TODO: Try coming up with laws to specify the behavior of product
-    /*def labelLaw[A](p: Parser[A], inputs: SGen[String]): Prop =
+    def labelLaw[A](p: Parser[A], inputs: SGen[String]): Prop =
       Prop.forAll(inputs ** Gen.string) { case (input: String, msg: String) =>
         run(label(msg)(p))(input) match {
           case Left(e: ParseError) => errorMessage(e) == msg
           case _ => true
         }
-      }*/
+      }
   }
 }
 
@@ -171,6 +198,16 @@ case class Location(input: String, offset: Int = 0) {
 }
 
 case class ParseError(stack: List[(Location, String)]) {
-  
+  def push(loc: Location, msg: String): ParseError =
+    copy(stack = (loc, msg) :: stack)
+
+  def label[A](msg: String): ParseError =
+    ParseError(latestLoc.map((l) => (l, msg)).toList)
+
+  def latestLoc: Option[Location] =
+    latest map (_._1)
+
+  def latest: Option[(Location, String)] =
+    stack.lastOption
 }
 
