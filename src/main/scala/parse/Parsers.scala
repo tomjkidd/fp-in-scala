@@ -95,6 +95,19 @@ trait Parsers[Parser[+_]] {
   def double: Parser[Double] =
     map(doubleString)(dblStr => dblStr.toDouble)
 
+  /** A parser that consumes `open`, then `p`, then `close`, ignoring `open` and `close` */
+  def surround[A](open: Parser[Any], close: Parser[Any])(p: Parser[A]): Parser[A] =
+    skipRight(skipLeft(open, p), close)
+
+  /** A parser which consumes `\z`, the regex end of input. Useful for ensuring no remaining input.  */
+  def endOfInput: Parser[String] = regex("\\z".r)
+
+  /** Consumes parser `p` input and then as much whitespace as possible */
+  def token[A](p: Parser[A]) = skipRight(p, whitespace)
+
+  /** Parse a value that expects no further input */
+  def root[A](p: Parser[A]) = skipRight(p, endOfInput)
+
   /** Sequence two parsers, ignoring the result of the first */
   def skipLeft[A, B](pl: Parser[A], pr: Parser[B]): Parser[B] =
     map2(slice(pl), pr)((_, r) => r)

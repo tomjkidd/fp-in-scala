@@ -121,8 +121,15 @@ object ParseRepl {
       p.run(jp)("[1,2,3,4]"),
       p.run(jp)("[null,true,false,0.1E24,[1,2,3]]"),
       p.run(jp)("{\"abc\":\"def\",\"foo\":1,\"bar\":true,\"baz\":null}"),
+      p.run(jp)("   [   1  ,   2 \n, 3 ]"),
       p.run(jp)("nonsense")
     )
+  }
+
+  def testJSONWithWhitespace(): Either[ParseError, JSON] = {
+    val p = BaseParsers
+    val jp = JSON.jsonParser(p)
+    p.run(jp)(TestCases.jsonTxt)
   }
 }
 
@@ -134,4 +141,15 @@ object TestCases {
   // run(listOfN(3, or(string("ab"), string("cad"))))("ababab") == Right("ababab")
   // run(numA)("aaa") == Right(3)
   // run(numA)("b") == Right(0)
+
+  val jsonTxt = """
+{
+  "Company name" : "Microsoft Corporation",
+  "Ticker"  : "MSFT",
+  "Active"  : true,
+  "Price"   : 30.66,
+  "Shares outstanding" : 8.38e9,
+  "Related companies" : [ "HPQ", "IBM", "YHOO", "DELL", "GOOG" ]
+}
+"""
 }
