@@ -8,6 +8,10 @@ trait Parsers[Parser[+_]] {
   /** Create a successful parser for a given A */
   def unit[A](a: A): Parser[A]
 
+  /** Create a failing parser for a given A */
+  // TODO: Create this
+  //def fail[A](msg: String): Parser[A]
+
   def map[A, B](pa: Parser[A])(f: A => B): Parser[B] =
     mapUsingFlatMap(pa)(f)
 
@@ -31,6 +35,10 @@ trait Parsers[Parser[+_]] {
   /** Recognize one of two options */
   def or[A](p1: Parser[A], p2: => Parser[A]): Parser[A]
 
+  /** Recognize one of a list of options */
+  // TODO: Implement this as a convenience
+  /*def or[A](ps: List[Parser[A]]): Parser[A]*/
+
   /** Recognize repetition */
   def listOfN[A](n: Int, p: Parser[A]): Parser[List[A]] =
     listOfNUsingMap2AndUnit(n, p)
@@ -42,7 +50,6 @@ trait Parsers[Parser[+_]] {
   def many1[A](p: Parser[A]): Parser[List[A]] = oneOrMore(p)
 
   def run[A](p: Parser[A])(input: String): Either[ParseError,A]
-
 
   /* Discovery */
   
@@ -79,6 +86,14 @@ trait Parsers[Parser[+_]] {
   /** A parser which consumes one or more digits */
   def digits: Parser[String] = regex("\\d+".r)
 
+  /** A parser which consumes a double as a string*/
+  // TODO: Correct this...
+  def doubleString: Parser[String] =
+    digits
+
+  def double: Parser[Double] =
+    map(doubleString)(dblStr => dblStr.toDouble)
+
   /** Sequence two parsers, ignoring the result of the first */
   def skipLeft[A, B](pl: Parser[A], pr: Parser[B]): Parser[B] =
     map2(slice(pl), pr)((_, r) => r)
@@ -97,6 +112,20 @@ trait Parsers[Parser[+_]] {
     val sepThenVal = map2(p2, p)((_, p) => p)
     map2(p, zeroOrMore(sepThenVal))((a, bs) => a :: bs)
   }
+
+  /** Match up to, and including, until the target `s` is encountered */
+  def thru(s: String): Parser[String] = {
+    // NOTE: The ? makes this reluctant, ie not-greedy
+    val r = (".*?" + java.util.regex.Pattern.quote(s)).r
+    regex(r)
+  }
+
+  def quotedWithQuotes: Parser[String] = {
+    map2(string("\""), thru("\""))((f, r) => f + r)
+  }
+
+  def quoted: Parser[String] =
+    skipLeft(string("\""), map(thru("\""))((str) => str.dropRight(1)))
 
   /* EXERCISE 9.7 */
   // Implement product and map2 in terms of flatMap

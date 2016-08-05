@@ -4,6 +4,7 @@ import testing._
 
 import parse._
 import parse.base._
+import parse.json._
 
 // What we'd like to have
 object ParseRepl {
@@ -94,9 +95,36 @@ object ParseRepl {
       p.run(zom)("123"),
       p.run(zom)("123,456"))
   }
+
+  def testThru(): List[Either[ParseError, String]] = {
+    val p = BaseParsers
+    List(
+      p.run(p.thru("Kidd"))("Tom Kidd, a man"),
+      p.run(p.thru("pars"))("eat a parsnip")
+    )
+  }
+
+
+  val p = BaseParsers
+  val jp = JSON.jsonParser(p)
+
+  def testJSON(): List[Either[ParseError, JSON]] = {
+    val p = BaseParsers
+    val jp = JSON.jsonParser(p)
+    List(
+      p.run(jp)("null"),
+      p.run(jp)("true"),
+      p.run(jp)("false"),
+      p.run(jp)("\"This is a JSON string!\""),
+      p.run(jp)("123"),
+      p.run(jp)("-1.7e-12"),
+      p.run(jp)("[1,2,3,4]"),
+      p.run(jp)("[null,true,false,0.1E24,[1,2,3]]"),
+      p.run(jp)("{\"abc\":\"def\",\"foo\":1,\"bar\":true,\"baz\":null}"),
+      p.run(jp)("nonsense")
+    )
+  }
 }
-
-
 
 object TestCases {
   // run(or(string("abra"), string("cadabra")))("abra") == Right("abra")
