@@ -9,8 +9,7 @@ trait Parsers[Parser[+_]] {
   def unit[A](a: A): Parser[A]
 
   /** Create a failing parser for a given A */
-  // TODO: Create this
-  //def fail[A](msg: String): Parser[A]
+  def fail[A](msg: String): Parser[A]
 
   def map[A, B](pa: Parser[A])(f: A => B): Parser[B] =
     mapUsingFlatMap(pa)(f)
@@ -35,9 +34,11 @@ trait Parsers[Parser[+_]] {
   /** Recognize one of two options */
   def or[A](p1: Parser[A], p2: => Parser[A]): Parser[A]
 
-  /** Recognize one of a list of options */
-  // TODO: Implement this as a convenience
-  /*def or[A](ps: List[Parser[A]]): Parser[A]*/
+  /** Lazily recognize one of a list of options, using the first leftmost match  */
+  def ors[A](ps: Stream[() => Parser[A]])(failMsg:String): Parser[A] = {
+    if(ps.isEmpty) fail[A](failMsg)
+    else or(ps.head(), ors(ps.tail)(failMsg))
+  }
 
   /** Recognize repetition */
   def listOfN[A](n: Int, p: Parser[A]): Parser[List[A]] =

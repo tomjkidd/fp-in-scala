@@ -50,28 +50,33 @@ object JSON {
       P.map(obj)(kvs => JObject(kvs.toMap))
     }
 
-    def value:Parser[JSON] =
-      // TODO: Get this to work...
-      //P.or(List(jnull, jtrue, jfalse, jstring, jnumber, jarray))
+    def value: Parser[JSON] = {
+      // NOTE: The parsers have to be listed this way because jarray and jobject
+      // are defined in terms of value, which would cause this function to
+      // StackOverflow if you don't defer evaluation.
+      val parsers = Stream(
+        () => jnull,
+        () => jtrue,
+        () => jfalse,
+        () => jstring,
+        () => jnumber,
+        () => jarray,
+        () => jobject
+      )
+      
+      P.ors(parsers)("Unable to parse input as JSON")
+    }
+    
+    def valAlt: Parser[JSON] =
+      // NOTE: Deferred evaluation is build into the or function
       P.or(jnull,
         P.or(jtrue,
           P.or(jfalse,
             P.or(jstring,
               P.or(jnumber,
-                P.or(jarray, jobject))))))
+                P.or(jarray,
+                  P.or(jobject, P.fail("Unable to parse input as JSON"))))))))
 
     value
   }
 }
-
-/*
- JSON
- value := string
-        | number
-        | object
-        | array
-        | true
-        | false
-        | null
-
- */

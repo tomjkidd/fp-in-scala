@@ -49,6 +49,9 @@ object BaseParsers extends Parsers[ParserType]{
   def unit[A](a: A): ParserType[A] =
     (parseState: ParseState) => Success(a, 0)
 
+  def fail[A](msg: String): ParserType[A] =
+    (parseState: ParseState) => Failure(parseState.loc.toError(msg))
+
   def flatMap[A,B](pa: ParserType[A])(f: A => ParserType[B]): ParserType[B] =
     (parseState: ParseState) => pa(parseState) match {
       case Success(a, n) => {
@@ -89,12 +92,12 @@ object BaseParsers extends Parsers[ParserType]{
       }
     }
 
-  def run[A](p: ParserType[A])(input: String): Either[ParseError, A] =
+  def run[A](p: ParserType[A])(input: String): Either[ParseError, A] = {
     p(ParseState(Location(input))) match {
       case Success(a, n) => Right(a)
       case Failure(e) => Left(e)
     }
-
+  }
   override def zeroOrMore[A](p: ParserType[A]): ParserType[List[A]] =
     (parseState: ParseState) => {
       val buf = new collection.mutable.ListBuffer[A]
